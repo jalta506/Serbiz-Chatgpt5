@@ -2,12 +2,45 @@ import { redirect } from 'next/navigation'
 import { db } from '@/lib/db'
 import { getSession } from '@/lib/auth'
 
+/** Normalize WhatsApp to wa.me link. Allows 8-digit CR numbers or 506 + 8. */
 function normalizeWa(input: string): string {
   const digits = (input || '').replace(/\D/g, '')
   if (!digits) return ''
   if (digits.length === 8) return `https://wa.me/506${digits}`
   if (digits.startsWith('506') && digits.length === 11) return `https://wa.me/${digits}`
   return `https://wa.me/${digits}`
+}
+
+/** Try to pull lat/lng from common Waze / Google Maps URLs. */
+function parseLatLng(url: string | null | undefined): { lat: number; lng: number } | null {
+  if (!url) return null
+  try {
+    const u = new URL(url)
+
+    // 1) Waze: ...?ll=lat,lng
+    const ll = u.searchParams.get('ll')
+    if (ll && /^-?\d+(\.\d+)?,-?\d+(\.\d+)?$/.test(ll)) {
+      const [lat, lng] = ll.split(',').map(Number)
+      if (isFinite(lat) && isFinite(lng)) return { lat, lng }
+    }
+
+    // 2) Google Maps: .../@lat,lng, or ...?q=lat,lng
+    const atMatch = u.pathname.match(/@(-?\d+(\.\d+)?),(-?\d+(\.\d+)?)/)
+    if (atMatch) {
+      const lat = Number(atMatch[1])
+      const lng = Number(atMatch[3])
+      if (isFinite(lat) && isFinite(lng)) return { lat, lng }
+    }
+
+    const q = u.searchParams.get('q')
+    if (q && /^-?\d+(\.\d+)?,-?\d+(\.\d+)?$/.test(q)) {
+      const [lat, lng] = q.split(',').map(Number)
+      if (isFinite(lat) && isFinite(lng)) return { lat, lng }
+    }
+  } catch {
+    // ignore parse errors
+  }
+  return null
 }
 
 export default async function AdminNewVendorPage() {
@@ -24,15 +57,16 @@ export default async function AdminNewVendorPage() {
     const name = String(formData.get('newCategory') || '').trim()
     if (!name) redirect('/admin/new?e=' + encodeURIComponent('Nombre de categoría vacío'))
 
-    // create ES+EN the same for now; slug from name
+    // ES/EN same for now; slugified from name
     const slug = name
       .toLowerCase()
-      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '')
 
     await db.category.create({
-      data: { name_es: name, name_en: name, slug }
+      data: { name_es: name, name_en: name, slug },
     })
     redirect('/admin/new')
   }
@@ -49,8 +83,8 @@ export default async function AdminNewVendorPage() {
     const district     = String(formData.get('district') || '').trim()
     const allCountry   = formData.get('allCountry') === 'on'
 
-    const instagramUrl = String(formData.get('instagramUrl') || '').trim() || null
-    const locationUrl  = String(formData.get('locationUrl')  || '').trim() || null
+    const instagramUrl = String(formData.get('instagramUrl') || '').trim()
+    const locationUrl  = String(formData.get('locationUrl')  || '').trim()
     const waRaw        = String(formData.get('whatsapp')     || '').trim()
     const whatsapp     = normalizeWa(waRaw)
 
@@ -61,6 +95,9 @@ export default async function AdminNewVendorPage() {
       redirect('/admin/new?e=' + encodeURIComponent('Complete ubicación o marque Todo el país'))
     }
 
+    const latLng = parseLatLng(locationUrl)
+
+    // IMPORTANT: Do NOT send nulls to Prisma; only include fields when present.
     await db.vendor.create({
       data: {
         ownerId: s.user.id,
@@ -71,25 +108,24 @@ export default async function AdminNewVendorPage() {
         canton:   allCountry ? '' : canton,
         district: allCountry ? '' : district,
         allCountry,
-        whatsapp,
-        phone: null,
-        imageUrl: null,
-        socials: null,
-        instagramUrl,
-        coverImage: null,
-        locationUrl,
-        locationLat: null,
-        locationLng: null,
-        isPublished: true
-      }
+
+        // contacts / links
+        whatsapp,                               // keep even if empty string
+        ...(instagramUrl && { instagramUrl }),
+        ...(locationUrl  && { locationUrl }),
+        ...(latLng && { locationLat: latLng.lat, locationLng: latLng.lng }),
+
+        // leave imageUrl / coverImage / phone / socials out unless you capture them
+        isPublished: true,
+      },
     })
 
     redirect('/admin')
   }
 
-  // read error banner if present
+  // read error banner if present (placeholder for build friendliness)
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const searchParams = {} as { e?: string } // (Netlify/Next build friendliness)
+  const searchParams = {} as { e?: string }
 
   return (
     <div className="max-w-2xl space-y-6">
@@ -126,8 +162,10 @@ export default async function AdminNewVendorPage() {
             <label className="text-sm font-medium">Categoría</label>
             <select name="categoryId" className="input" required>
               <option value="">Seleccione categoría</option>
-              {categories.map(c => (
-                <option key={c.id} value={c.id}>{c.name_es}</option>
+              {categories.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name_es}
+                </option>
               ))}
             </select>
           </div>
