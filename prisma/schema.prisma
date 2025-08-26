@@ -1,0 +1,104 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id        String       @id @default(cuid())
+  username  String       @unique
+  password  String
+  role      Role         @default(USER)
+  locale    String       @default("es")
+  vendors   Vendor[]
+  favorites Favorite[]
+  recents   RecentView[]
+  createdAt DateTime     @default(now())
+}
+
+model Vendor {
+  id            String         @id @default(cuid())
+  ownerId       String
+  owner         User           @relation(fields: [ownerId], references: [id])
+
+  businessName  String
+  categoryId    String
+  category      Category       @relation(fields: [categoryId], references: [id])
+
+  tags          String[]
+
+  province      String
+  canton        String
+  district      String
+  allCountry    Boolean        @default(false)
+
+  whatsapp      String
+  phone         String?
+  imageUrl      String?
+  socials       Json?
+
+  // NEW: Instagram support
+  instagramUrl  String?        // e.g., https://www.instagram.com/tu.negocio/
+  coverImage    String?        // OG image we fetch for the card (profile picture, etc.)
+
+  isPublished   Boolean        @default(true)
+  createdAt     DateTime       @default(now())
+  contacts      ContactEvent[]
+
+  // Back-relations
+  favorites     Favorite[]
+  recents       RecentView[]
+}
+
+model Category {
+  id        String     @id @default(cuid())
+  name_es   String
+  name_en   String
+  slug      String     @unique
+  iconKey   String?
+  parentId  String?
+
+  // Self-relation: parent defines fields/references
+  parent    Category?  @relation("CategoryToCategory", fields: [parentId], references: [id])
+  children  Category[] @relation("CategoryToCategory")
+
+  vendors   Vendor[]
+  synonyms  String[]
+}
+
+model ContactEvent {
+  id        String   @id @default(cuid())
+  vendorId  String
+  vendor    Vendor   @relation(fields: [vendorId], references: [id])
+  createdAt DateTime @default(now())
+  userId    String?
+  ip        String?
+}
+
+model Favorite {
+  id        String   @id @default(cuid())
+  userId    String
+  vendorId  String
+  user      User     @relation(fields: [userId], references: [id])
+  vendor    Vendor   @relation(fields: [vendorId], references: [id])
+  createdAt DateTime @default(now())
+}
+
+model RecentView {
+  id        String   @id @default(cuid())
+  userId    String
+  vendorId  String
+  user      User     @relation(fields: [userId], references: [id])
+  vendor    Vendor   @relation(fields: [vendorId], references: [id])
+  viewedAt  DateTime @default(now())
+}
+
+enum Role {
+  USER
+  VENDOR
+  ADMIN
+}

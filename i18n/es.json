@@ -1,0 +1,19 @@
+{
+  "banner": "\u00a1Todo lo que necesitas est\u00e1 en SERBIZ!",
+  "search_placeholder": "Busca un servicio o escribe una categor\u00eda...",
+  "location": "Ubicaci\u00f3n",
+  "all_country": "Todo el pa\u00eds",
+  "categories": "Categor\u00edas",
+  "results": "Resultados",
+  "login": "Iniciar sesi\u00f3n",
+  "register": "Crear cuenta",
+  "logout": "Cerrar sesi\u00f3n",
+  "user": "Usuario",
+  "vendor": "Proveedor",
+  "favorites_locked": "Favoritos (Disponible pronto)",
+  "recents_locked": "Recientes (Disponible pronto)",
+  "contact_limit_reached": "Contacte a SERBIZ ventas para incrementar el n\u00famero de contactos por semana.",
+  "view_vendor": "Ver proveedor",
+  "whatsapp": "WhatsApp",
+  "search": "Buscar"
+}
