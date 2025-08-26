@@ -4,13 +4,13 @@ import type { Vendor, Category } from '@prisma/client'
 type VendorWithCat = Vendor & { category?: Category | null }
 
 function areaString(v: Vendor) {
-  if (v.allCountry) return 'Costa Rica'
-  return [v.district, v.canton, v.province].filter(Boolean).join(', ')
+  if ((v as any).allCountry) return 'Costa Rica'
+  const parts = [(v as any).district, (v as any).canton, (v as any).province].filter(Boolean)
+  return parts.join(', ')
 }
 
 export function whatsappUrl(v: Vendor) {
-  // already normalized as https://wa.me/...
-  return v.whatsapp
+  return (v as any).whatsapp as string
 }
 
 export function telUrl(phone?: string | null) {
@@ -21,23 +21,27 @@ export function telUrl(phone?: string | null) {
 }
 
 export function wazeUrl(v: Vendor) {
-  if (v.locationUrl && /waze\.com/i.test(v.locationUrl)) return v.locationUrl
-  if (v.lat != null && v.lng != null) {
-    // Waze deep-link with coordinates
-    return `https://waze.com/ul?ll=${v.lat},${v.lng}&navigate=yes`
-  }
-  // Fallback: Waze search query
-  const q = `${v.businessName} ${areaString(v)}`
+  // ✅ always read via a safe cast (remote build may not see the new field yet)
+  const loc = (v as any).locationUrl as string | undefined | null
+  const lat = (v as any).lat as number | undefined
+  const lng = (v as any).lng as number | undefined
+
+  if (loc && /waze\.com/i.test(loc)) return loc
+  if (lat != null && lng != null) return `https://waze.com/ul?ll=${lat},${lng}&navigate=yes`
+
+  const q = `${(v as any).businessName} ${areaString(v)}`
   return `https://waze.com/ul?q=${encodeURIComponent(q)}`
 }
 
 export function gmapsUrl(v: Vendor) {
-  if (v.locationUrl && /(google\.[^/]+\/maps|goo\.gl\/maps)/i.test(v.locationUrl)) {
-    return v.locationUrl
+  const loc = (v as any).locationUrl as string | undefined | null
+  const lat = (v as any).lat as number | undefined
+  const lng = (v as any).lng as number | undefined
+
+  if (loc && /(google\.[^/]+\/maps|goo\.gl\/maps)/i.test(loc)) return loc
+  if (lat != null && lng != null) {
+    return `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`
   }
-  if (v.lat != null && v.lng != null) {
-    return `https://www.google.com/maps/search/?api=1&query=${v.lat},${v.lng}`
-  }
-  const q = `${v.businessName} ${areaString(v)}`
+  const q = `${(v as any).businessName} ${areaString(v)}`
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`
 }
