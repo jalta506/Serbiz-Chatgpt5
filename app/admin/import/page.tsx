@@ -1,17 +1,14 @@
+// app/admin/import/page.tsx
 import { db } from '@/lib/db'
 import { getSession } from '@/lib/auth'
 import { redirect } from 'next/navigation'
 import { fetchOgImage, prettyFromHandle } from '@/lib/og'
 
-type ActionResult = {
-  ok: boolean
-  message: string
-  created?: number
-  skipped?: number
-  errors?: Array<{ line: string; reason: string }>
-}
-
-export default async function AdminImportPage() {
+export default async function AdminImportPage({
+  searchParams,
+}: {
+  searchParams?: { msg?: string }
+}) {
   const session = await getSession()
   if (!session.user || session.user.role !== 'admin') redirect('/')
 
@@ -19,10 +16,10 @@ export default async function AdminImportPage() {
     orderBy: { name_es: 'asc' },
   })
 
-  async function importAction(formData: FormData): Promise<ActionResult> {
+  async function importAction(formData: FormData): Promise<void> {
     'use server'
     const s = await getSession()
-    if (!s.user || s.user.role !== 'admin') return { ok: false, message: 'No autorizado' }
+    if (!s.user || s.user.role !== 'admin') return redirect('/')
 
     const raw = String(formData.get('profiles') || '')
     const categoryId = String(formData.get('categoryId') || '')
@@ -33,44 +30,50 @@ export default async function AdminImportPage() {
     const draftMode = formData.get('draftMode') !== 'off' // default ON
     const whatsappDefault = String(formData.get('whatsappDefault') || '').trim()
 
-    if (!categoryId) return { ok: false, message: 'Seleccione una categoría' }
+    if (!categoryId) {
+      return redirect('/admin/import?msg=' + encodeURIComponent('Seleccione una categoría'))
+    }
     if (!allCountry && (!province || !canton || !district)) {
-      return { ok: false, message: 'Complete provincia/cantón/distrito o marque Todo el país' }
+      return redirect(
+        '/admin/import?msg=' +
+          encodeURIComponent('Complete provincia/cantón/distrito o marque Todo el país'),
+      )
     }
 
-    // normalize WhatsApp default
+    // normalize WhatsApp default for CR
     function normalizeWa(input: string): string {
       const digits = (input || '').replace(/\D/g, '')
-      if (!digits) return 'https://wa.me/50600000000' // placeholder if empty
+      if (!digits) return 'https://wa.me/50600000000' // placeholder
       if (digits.length === 8) return `https://wa.me/506${digits}`
       if (digits.startsWith('506') && digits.length === 11) return `https://wa.me/${digits}`
       return `https://wa.me/${digits}`
     }
     const whatsapp = normalizeWa(whatsappDefault)
 
+    // split lines and parse handles/urls
     const lines = raw
       .split('\n')
-      .map(l => l.trim())
+      .map((l) => l.trim())
       .filter(Boolean)
 
     if (lines.length === 0) {
-      return { ok: false, message: 'Pegue 1 o más perfiles de Instagram (uno por línea).' }
+      return redirect(
+        '/admin/import?msg=' +
+          encodeURIComponent('Pegue 1 o más perfiles de Instagram (uno por línea).'),
+      )
     }
-
-    let created = 0
-    let skipped = 0
-    const errors: Array<{ line: string; reason: string }> = []
 
     function toInstagramUrl(line: string): string | null {
       try {
         if (line.startsWith('http')) {
           const u = new URL(line)
           const host = u.hostname.replace(/^www\./, '')
-          if (!host.endsWith('instagram.com')) return null
+          if (!/instagram\.com$/i.test(host)) return null
           const parts = u.pathname.split('/').filter(Boolean)
           if (!parts[0]) return null
           return `https://www.instagram.com/${parts[0]}/`
         }
+        // @handle or handle
         const handle = line.replace(/^@/, '').split(/[/?#]/)[0]
         if (!handle) return null
         return `https://www.instagram.com/${handle}/`
@@ -79,57 +82,60 @@ export default async function AdminImportPage() {
       }
     }
 
+    let created = 0
+    let skipped = 0
+
     for (const line of lines) {
       const insta = toInstagramUrl(line)
       if (!insta) {
         skipped++
-        errors.push({ line, reason: 'No es un perfil de Instagram válido' })
         continue
       }
 
+      // derive a pretty business name from the handle
       const { pretty } = prettyFromHandle(insta)
       const businessName = pretty || 'Perfil de Instagram'
 
-      // Try OG image
-      let coverImage: string | undefined
+      // try OG image
+      let coverImage: string | null = null
       try {
-        const img = await fetchOgImage(insta)
-        if (img) coverImage = img
+        coverImage = await fetchOgImage(insta)
       } catch {
         // ignore
       }
 
       try {
-        // Build payload WITHOUT any `null` values
-        const data: any = {
-          ownerId: s.user.id,
-          businessName,
-          categoryId,
-          tags: [],
-          province: allCountry ? '' : province,
-          canton: allCountry ? '' : canton,
-          district: allCountry ? '' : district,
-          allCountry,
-          whatsapp,
-          isPublished: draftMode ? false : true,
-          ...(insta ? { instagramUrl: insta } : {}),
-          ...(coverImage ? { imageUrl: coverImage } : {}),
-          // If later you capture these, include when present:
-          // ...(phone ? { phone } : {}),
-          // ...(socials ? { socials } : {}),
-        }
-
-        await db.vendor.create({ data })
+        await db.vendor.create({
+          data: {
+            ownerId: s.user.id, // admin as owner; you can reassign later
+            businessName,
+            categoryId,
+            tags: [],
+            province: allCountry ? '' : province,
+            canton: allCountry ? '' : canton,
+            district: allCountry ? '' : district,
+            allCountry,
+            whatsapp,
+            // avoid `null` in JSON-able columns on strict builds:
+            phone: undefined,
+            imageUrl: coverImage ?? undefined,
+            socials: {} as any,
+            instagramUrl: insta,
+            coverImage: coverImage ?? undefined,
+            isPublished: draftMode ? false : true,
+          },
+        })
         created++
-      } catch (e: any) {
+      } catch {
         skipped++
-        errors.push({ line, reason: e?.message || 'Error al crear el vendor' })
       }
     }
 
     const message = `Importación completada: ${created} creados, ${skipped} omitidos.`
-    return { ok: true, message, created, skipped, errors }
+    return redirect('/admin/import?msg=' + encodeURIComponent(message))
   }
+
+  const banner = searchParams?.msg
 
   return (
     <div className="space-y-6 max-w-3xl">
@@ -140,6 +146,12 @@ export default async function AdminImportPage() {
         crean como <b>borrador</b> por defecto (no publicados) y con un WhatsApp por defecto que
         puedes cambiar luego.
       </p>
+
+      {banner && (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-800 px-3 py-2">
+          {banner}
+        </div>
+      )}
 
       <form action={importAction} className="card space-y-3">
         <div className="grid gap-2">
@@ -158,7 +170,7 @@ export default async function AdminImportPage() {
             <label className="text-sm font-medium">Categoría</label>
             <select name="categoryId" className="input" required>
               <option value="">Seleccione categoría</option>
-              {categories.map(c => (
+              {categories.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name_es}
                 </option>
