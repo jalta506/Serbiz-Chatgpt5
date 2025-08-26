@@ -33,9 +33,7 @@ export default async function AdminImportPage() {
     const draftMode = formData.get('draftMode') !== 'off' // default ON
     const whatsappDefault = String(formData.get('whatsappDefault') || '').trim()
 
-    if (!categoryId) {
-      return { ok: false, message: 'Seleccione una categoría' }
-    }
+    if (!categoryId) return { ok: false, message: 'Seleccione una categoría' }
     if (!allCountry && (!province || !canton || !district)) {
       return { ok: false, message: 'Complete provincia/cantón/distrito o marque Todo el país' }
     }
@@ -46,12 +44,10 @@ export default async function AdminImportPage() {
       if (!digits) return 'https://wa.me/50600000000' // placeholder if empty
       if (digits.length === 8) return `https://wa.me/506${digits}`
       if (digits.startsWith('506') && digits.length === 11) return `https://wa.me/${digits}`
-      // fallback: still try to produce a wa link
       return `https://wa.me/${digits}`
     }
     const whatsapp = normalizeWa(whatsappDefault)
 
-    // split lines and parse handles/urls
     const lines = raw
       .split('\n')
       .map(l => l.trim())
@@ -65,20 +61,16 @@ export default async function AdminImportPage() {
     let skipped = 0
     const errors: Array<{ line: string; reason: string }> = []
 
-    // helper: make full URL from line
     function toInstagramUrl(line: string): string | null {
       try {
         if (line.startsWith('http')) {
           const u = new URL(line)
-          if (!/instagram\.com$/i.test(u.hostname) && !/instagram\.com$/i.test(u.hostname.replace(/^www\./,''))) {
-            return null
-          }
-          // ensure trailing slash after handle path
+          const host = u.hostname.replace(/^www\./, '')
+          if (!host.endsWith('instagram.com')) return null
           const parts = u.pathname.split('/').filter(Boolean)
           if (!parts[0]) return null
           return `https://www.instagram.com/${parts[0]}/`
         }
-        // @handle or handle
         const handle = line.replace(/^@/, '').split(/[/?#]/)[0]
         if (!handle) return null
         return `https://www.instagram.com/${handle}/`
@@ -87,7 +79,6 @@ export default async function AdminImportPage() {
       }
     }
 
-    // process sequentially to be gentle with remote fetches
     for (const line of lines) {
       const insta = toInstagramUrl(line)
       if (!insta) {
@@ -96,38 +87,39 @@ export default async function AdminImportPage() {
         continue
       }
 
-      // derive a pretty business name from the handle
       const { pretty } = prettyFromHandle(insta)
       const businessName = pretty || 'Perfil de Instagram'
 
-      // try OG image
-      let coverImage: string | null = null
+      // Try OG image
+      let coverImage: string | undefined
       try {
-        coverImage = await fetchOgImage(insta)
+        const img = await fetchOgImage(insta)
+        if (img) coverImage = img
       } catch {
         // ignore
       }
 
       try {
-        await db.vendor.create({
-          data: {
-            ownerId: s.user.id, // set admin as owner (you can later reassign)
-            businessName,
-            categoryId,
-            tags: [],
-            province: allCountry ? '' : province,
-            canton: allCountry ? '' : canton,
-            district: allCountry ? '' : district,
-            allCountry,
-            whatsapp,
-            phone: null,
-            imageUrl: null,
-            socials: null,
-            instagramUrl: insta,
-            coverImage,
-            isPublished: draftMode ? false : true,
-          },
-        })
+        // Build payload WITHOUT any `null` values
+        const data: any = {
+          ownerId: s.user.id,
+          businessName,
+          categoryId,
+          tags: [],
+          province: allCountry ? '' : province,
+          canton: allCountry ? '' : canton,
+          district: allCountry ? '' : district,
+          allCountry,
+          whatsapp,
+          isPublished: draftMode ? false : true,
+          ...(insta ? { instagramUrl: insta } : {}),
+          ...(coverImage ? { imageUrl: coverImage } : {}),
+          // If later you capture these, include when present:
+          // ...(phone ? { phone } : {}),
+          // ...(socials ? { socials } : {}),
+        }
+
+        await db.vendor.create({ data })
         created++
       } catch (e: any) {
         skipped++
@@ -144,9 +136,9 @@ export default async function AdminImportPage() {
       <h1 className="text-2xl font-bold">Importar desde Instagram</h1>
       <p className="text-sm text-black/70">
         Pega 1 perfil de Instagram por línea. Ejemplos válidos: <code>@mi.negocio</code>,{' '}
-        <code>https://www.instagram.com/mi.negocio/</code>, <code>mi.negocio</code>.
-        Los vendors se crean como <b>borrador</b> por defecto (no publicados) y con un WhatsApp
-        por defecto que puedes cambiar luego.
+        <code>https://www.instagram.com/mi.negocio/</code>, <code>mi.negocio</code>. Los vendors se
+        crean como <b>borrador</b> por defecto (no publicados) y con un WhatsApp por defecto que
+        puedes cambiar luego.
       </p>
 
       <form action={importAction} className="card space-y-3">
@@ -167,18 +159,16 @@ export default async function AdminImportPage() {
             <select name="categoryId" className="input" required>
               <option value="">Seleccione categoría</option>
               {categories.map(c => (
-                <option key={c.id} value={c.id}>{c.name_es}</option>
+                <option key={c.id} value={c.id}>
+                  {c.name_es}
+                </option>
               ))}
             </select>
           </div>
 
           <div className="grid gap-2">
             <label className="text-sm font-medium">WhatsApp (por defecto, opcional)</label>
-            <input
-              name="whatsappDefault"
-              className="input"
-              placeholder="506XXXXXXXX (opcional)"
-            />
+            <input name="whatsappDefault" className="input" placeholder="506XXXXXXXX (opcional)" />
           </div>
         </div>
 
@@ -201,10 +191,9 @@ export default async function AdminImportPage() {
         <button className="btn btn-primary w-full">Importar</button>
       </form>
 
-      {/* Results slot – Next will render the returned object in dev, but we keep UX simple here.
-          If you want a visible banner, you can convert to a searchParam redirect with ?msg=... */}
       <div className="text-sm text-black/60">
-        Consejo: después de importar, revisa los vendors en <b>/admin</b>, edita WhatsApp real y publica.
+        Consejo: después de importar, revisa los vendors en <b>/admin</b>, edita WhatsApp real y
+        publica.
       </div>
     </div>
   )
