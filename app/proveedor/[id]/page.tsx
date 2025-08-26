@@ -11,6 +11,9 @@ export default async function VendorDetail({ params }: { params: { id: string } 
   })
   if (!vendor || !vendor.isPublished) return notFound()
 
+  // Safely read optional field that may not be present in remote Prisma types yet
+  const locationUrl = (vendor as any).locationUrl as string | undefined | null
+
   const wa = whatsappUrl(vendor)
   const tel = telUrl(vendor.phone)
   const wz = wazeUrl(vendor)
@@ -19,9 +22,6 @@ export default async function VendorDetail({ params }: { params: { id: string } 
   const area = vendor.allCountry
     ? 'Costa Rica'
     : [vendor.district, vendor.canton, vendor.province].filter(Boolean).join(', ')
-
-  // Record recent view if logged-in user (best-effort, non-blocking)
-  // You likely already have this; if not, you can add an API route to log it.
 
   return (
     <div className="grid gap-6 md:grid-cols-3">
@@ -50,20 +50,12 @@ export default async function VendorDetail({ params }: { params: { id: string } 
           <a href={wa} target="_blank" rel="noopener noreferrer" className="btn btn-primary">
             WhatsApp
           </a>
-          {tel && (
-            <a href={tel} className="btn">
-              Llamar
-            </a>
-          )}
-          <a href={wz} target="_blank" rel="noopener noreferrer" className="btn">
-            Waze
-          </a>
-          <a href={gm} target="_blank" rel="noopener noreferrer" className="btn">
-            Maps
-          </a>
-          {vendor.instagramUrl && (
+          {tel && <a href={tel} className="btn">Llamar</a>}
+          <a href={wz} target="_blank" rel="noopener noreferrer" className="btn">Waze</a>
+          <a href={gm} target="_blank" rel="noopener noreferrer" className="btn">Maps</a>
+          {(vendor as any).instagramUrl && (
             <a
-              href={vendor.instagramUrl}
+              href={(vendor as any).instagramUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="btn"
@@ -72,17 +64,15 @@ export default async function VendorDetail({ params }: { params: { id: string } 
             </a>
           )}
         </div>
-
-        {/* (Later) tiny map preview using lat/lng */}
       </div>
 
       <aside className="space-y-3">
         <div className="card">
           <div className="font-semibold mb-1">Ubicación</div>
           <div className="text-sm text-black/70">{area}</div>
-          {vendor.locationUrl && (
+          {locationUrl && (
             <a
-              href={vendor.locationUrl}
+              href={locationUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="link mt-2 inline-block"
@@ -95,8 +85,17 @@ export default async function VendorDetail({ params }: { params: { id: string } 
         <div className="card">
           <div className="font-semibold mb-1">Contacto</div>
           <div className="text-sm break-all">
-            <div>WhatsApp: <a className="link" href={wa} target="_blank" rel="noreferrer">{wa}</a></div>
-            {tel && <div>Teléfono: <a className="link" href={tel}>{vendor.phone}</a></div>}
+            <div>
+              WhatsApp:{' '}
+              <a className="link" href={wa} target="_blank" rel="noreferrer">
+                {wa}
+              </a>
+            </div>
+            {tel && (
+              <div>
+                Teléfono: <a className="link" href={tel}>{vendor.phone}</a>
+              </div>
+            )}
           </div>
         </div>
       </aside>
